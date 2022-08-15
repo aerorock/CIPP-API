@@ -4,7 +4,7 @@ using namespace System.Net
 param($Request, $TriggerMetadata)
 
 $APIName = $TriggerMetadata.FunctionName
-Log-Request -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
+Write-LogMessage -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
 
 $selectlist = "id", "companyName", "displayName", "mail", "onPremisesSyncEnabled", "editURL"
 
@@ -29,9 +29,7 @@ catch {
     $StatusCode = [HttpStatusCode]::Forbidden
     $GraphRequest = $ErrorMessage
 }
-# Associate values to output bindings by calling 'Push-OutputBinding'.
 Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
         StatusCode = $StatusCode
         Body       = @($GraphRequest)
     })
-

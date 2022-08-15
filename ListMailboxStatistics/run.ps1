@@ -4,7 +4,7 @@ using namespace System.Net
 param($Request, $TriggerMetadata)
 
 $APIName = $TriggerMetadata.FunctionName
-Log-Request -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
+Write-LogMessage -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
 
 
 # Write to the Azure Functions log stream.
@@ -19,7 +19,7 @@ try {
     @{ Name = 'UsedGB'; Expression = { [math]::round($_.'Storage Used (Byte)' / 1GB, 0) } },
     @{ Name = 'QuotaGB'; Expression = { [math]::round($_.'Prohibit Send/Receive Quota (Byte)' / 1GB, 0) } },
     @{ Name = 'ItemCount'; Expression = { $_.'Item Count' } },
-    @{ Name = 'HasArchive'; Expression = { $_.'Has Archive' } }
+    @{ Name = 'HasArchive'; Expression = { If (($_.'Has Archive').ToLower() -eq 'true') { [bool]$true } else { [bool]$false } } }
     $StatusCode = [HttpStatusCode]::OK
 }
 catch {

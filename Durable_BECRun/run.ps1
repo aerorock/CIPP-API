@@ -2,24 +2,18 @@ param($Context)
 #$Context does not allow itself to be cast to a pscustomobject for some reason, so we convert
 $context = $Context | ConvertTo-Json | ConvertFrom-Json
 $APIName = $TriggerMetadata.FunctionName
-Log-Request -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
+Write-LogMessage -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
 Write-Host "PowerShell HTTP trigger function processed a request."
 Write-Host ($Context | ConvertTo-Json)
 $TenantFilter = $Context.input.tenantfilter
 $SuspectUser = $Context.input.userid
 $GUID = $context.input.GUID
 
-
-
 try {
   $startDate = (Get-Date).AddDays(-7)
   $endDate = (Get-Date)
-  $upn = "notRequired@required.com"
-  $tokenvalue = ConvertTo-SecureString (Get-GraphToken -AppID 'a0c73c16-a7e3-4564-9a95-2bdf47383716' -RefreshToken $ENV:ExchangeRefreshToken -Scope 'https://outlook.office365.com/.default' -Tenantid $TenantFilter).Authorization -AsPlainText -Force
-  $credential = New-Object System.Management.Automation.PSCredential($upn, $tokenValue)
-  $session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "https://ps.outlook.com/powershell-liveid?DelegatedOrg=$($TenantFilter)&BasicAuthToOAuthConversion=true" -Credential $credential -Authentication Basic -AllowRedirection -ErrorAction Continue
-  $s = Import-PSSession $session -ea Silentlycontinue -AllowClobber -CommandName "Search-unifiedAuditLog", "Get-AdminAuditLogConfig"
-  $7dayslog = if ((Get-AdminAuditLogConfig).UnifiedAuditLogIngestionEnabled -eq $false) {
+  $auditLog = (New-ExoRequest -tenantid $Tenantfilter -cmdlet "Get-AdminAuditLogConfig").UnifiedAuditLogIngestionEnabled 
+  $7dayslog = if ($auditLog -eq $false) {
     "AuditLog is disabled. Cannot perform full analysis"
   }
   else {
@@ -39,25 +33,43 @@ try {
       "Change user password.",
       "Reset user password."
     )
+    $startDate = (Get-Date).AddDays(-7)
+    $endDate = (Get-Date)
+    $SearchParam = @{
+      SessionCommand = "ReturnLargeSet"
+      Operations     = $operations
+      sessionid      = $sessionid
+      startDate      = $startDate
+      endDate        = $endDate
+    }
     do {
-      $logsTenant = Search-unifiedAuditLog -SessionCommand ReturnLargeSet -ResultSize 5000 -StartDate $startDate -EndDate $endDate -sessionid $sessionid -Operations $operations
+      New-ExoRequest -tenantid $Tenantfilter -cmdlet "Search-unifiedAuditLog" -cmdParams $SearchParam
       Write-Host "Retrieved $($logsTenant.count) logs" -ForegroundColor Yellow
       $logsTenant
     } while ($LogsTenant.count % 5000 -eq 0 -and $LogsTenant.count -ne 0)
   }
-  Get-PSSession | Remove-PSSession
   #Get user last logon
   $uri = "https://login.microsoftonline.com/$($TenantFilter)/oauth2/token"
   $body = "resource=https://admin.microsoft.com&grant_type=refresh_token&refresh_token=$($ENV:ExchangeRefreshToken)"
   Write-Host "getting token"
   $token = Invoke-RestMethod $uri -Body $body -ContentType "application/x-www-form-urlencoded" -ErrorAction SilentlyContinue -Method post
   Write-Host "got token"
-  $LastSignIn = Invoke-RestMethod -ContentType "application/json;charset=UTF-8" -Uri "https://admin.microsoft.com/admin/api/users/$($SuspectUser)/lastSignInInfo" -Method GET -Headers @{
-    Authorization            = "Bearer $($token.access_token)";
-    "x-ms-client-request-id" = [guid]::NewGuid().ToString();
-    "x-ms-client-session-id" = [guid]::NewGuid().ToString()
-    'x-ms-correlation-id'    = [guid]::NewGuid()
-    'X-Requested-With'       = 'XMLHttpRequest' 
+  try {
+    $LastSignIn = Invoke-RestMethod -ContentType "application/json;charset=UTF-8" -Uri "https://admin.microsoft.com/admin/api/users/$($SuspectUser)/lastSignInInfo" -Method GET -Headers @{
+      Authorization            = "Bearer $($token.access_token)";
+      "x-ms-client-request-id" = [guid]::NewGuid().ToString();
+      "x-ms-client-session-id" = [guid]::NewGuid().ToString()
+      'x-ms-correlation-id'    = [guid]::NewGuid()
+      'X-Requested-With'       = 'XMLHttpRequest' 
+    }
+  }
+  catch {
+    $LastSignIn = [PSCustomObject]@{
+      AppDisplayName  = "Unknown - could not retrieve information"
+      CreatedDateTime = "Unknown"
+      Id              = "0"
+      Status          = "Could not retrieve additional details"
+    }
   }
   #List all users devices
   Write-Host "Last Sign in is: $LastSignIn"
@@ -106,11 +118,11 @@ try {
     ChangedPasswords         = @(($7dayslog | Where-Object -Property Operations -In "Change user password.", "Reset user password.").AuditData | ConvertFrom-Json)
   }
     
-  #Log-Request -user $request.headers.'x-ms-client-principal' -API $APINAME -tenant $($tenantfilter) -message "Assigned $($appFilter) to $assignTo" -Sev "Info"
+  #Write-LogMessage -user $request.headers.'x-ms-client-principal' -API $APINAME -tenant $($tenantfilter) -message "Assigned $($appFilter) to $assignTo" -Sev "Info"
 
 }
 catch {
-  #Log-Request -user $request.headers.'x-ms-client-principal' -API $APINAME -tenant $($tenantfilter) -message "Failed to assign app $($appFilter): $($_.Exception.Message)" -Sev "Error"
+  #Write-LogMessage -user $request.headers.'x-ms-client-principal' -API $APINAME -tenant $($tenantfilter) -message "Failed to assign app $($appFilter): $($_.Exception.Message)" -Sev "Error"
   $errMessage = Get-NormalizedError -message $_.Exception.Message
   $results = [pscustomobject]@{"Results" = "$errMessage" }
 }

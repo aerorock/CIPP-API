@@ -4,25 +4,37 @@ using namespace System.Net
 param($Request, $TriggerMetadata)
 
 $APIName = $TriggerMetadata.FunctionName
-Log-Request -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
+Write-LogMessage -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
 
 
 # Write to the Azure Functions log stream.
 Write-Host "PowerShell HTTP trigger function processed a request."
-
-$Tenants = Get-ChildItem "Cache_Standards\*.standards.json"
+if ($Request.query.TenantFilter) { 
+    $tenants = Get-ChildItem "Cache_Standards\$($Request.query.TenantFilter).standards.json" 
+}
+else {
+    $Tenants = Get-ChildItem "Cache_Standards\*.standards.json"
+}
 
 $CurrentStandards = foreach ($tenant in $tenants) {
     $StandardsFile = Get-Content "$($tenant)" | ConvertFrom-Json
-    if ($StandardsFile.Tenant -eq $null) { continue }
+    if ($null -eq $StandardsFile.Tenant) { continue }
     [PSCustomObject]@{
-        displayName  = $StandardsFile.tenant
-        standardName = ($standardsFile.Standards.psobject.properties.name -join ' & ')
-        appliedBy    = $StandardsFile.addedby
+        displayName = $StandardsFile.tenant
+        appliedBy   = $StandardsFile.addedby
+        appliedAt   = ($tenant).LastWriteTime.toString('s')
+        standards   = $StandardsFile.standards
     }
 }
 
-
+if (!$CurrentStandards) {
+    $CurrentStandards = [PSCustomObject]@{
+        displayName = "No Standards applied"
+        appliedBy   = $null
+        appliedAt   = $null
+        standards   = @{none = $null }
+    }
+}
 # Associate values to output bindings by calling 'Push-OutputBinding'.
 Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
         StatusCode = [HttpStatusCode]::OK

@@ -4,7 +4,7 @@ using namespace System.Net
 param($Request, $TriggerMetadata)
 
 $APIName = $TriggerMetadata.FunctionName
-Log-Request -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
+Write-LogMessage -user $request.headers.'x-ms-client-principal' -API $APINAME  -message "Accessed this API" -Sev "Debug"
 
 $user = $request.headers.'x-ms-client-principal'
 $username = ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($user)) | ConvertFrom-Json).userDetails
@@ -12,20 +12,20 @@ New-Item Cache_Standards -ItemType Directory -ErrorAction SilentlyContinue
 
 try {
     $Tenants = ($Request.body | Select-Object Select_*).psobject.properties.value
-    $Settings = ($request.body | Select-Object -Property * -ExcludeProperty Select_*, DataTable* )
+    $Settings = ($request.body | Select-Object -Property * -ExcludeProperty Select_*, None )
     foreach ($Tenant in $tenants) {
         
         $object = [PSCustomObject]@{
             Tenant    = $tenant
             AddedBy   = $username
             Standards = $Settings
-        } | ConvertTo-Json
+        } | ConvertTo-Json -Depth 10
         Set-Content "Cache_Standards\$($tenant).Standards.json" -Value $Object -Force
     }
     $body = [pscustomobject]@{"Results" = "Successfully added standards deployment" }
 }
 catch {
-    Log-Request -user $request.headers.'x-ms-client-principal'  -API $APINAME -message "Standards API failed. $($_.Exception.Message)" -Sev "Error"
+    Write-LogMessage -user $request.headers.'x-ms-client-principal'  -API $APINAME -message "Standards API failed. $($_.Exception.Message)" -Sev "Error"
     $body = [pscustomobject]@{"Results" = "Failed to add standard: $($_.Exception.Message)" }
 }
 
